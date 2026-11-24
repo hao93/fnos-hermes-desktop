@@ -167,6 +167,46 @@ check_process() {
     [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null
 }
 
+# 判断 pid 是否为“本应用 HERMES_HOME 下的 gateway”。
+is_own_gateway() {
+    local pid="$1" cmdline
+    [ -n "${pid}" ] || return 1
+    cmdline="$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null)" || return 1
+    [ -n "${cmdline}" ] || return 1
+    case "${cmdline}" in
+        *"${DATA_DIR}"*gateway*) return 0 ;;
+    esac
+    return 1
+}
+
+# 采纳“不是本次启动”的 gateway。
+# Hermes 会自行重启（dashboard 重启、/restart、改配置后的重启、更新守护），
+# 新进程由 detached watcher 拉起，永远不会写回 app.pid；此时应用其实在正常服务，
+# 但 status 只认 app.pid 就会报未运行 → 应用中心显示“未启用”，用户点“启用”
+# 还会把健康的 gateway 杀掉重开。这里用 gateway.pid / 端口归属把真实 PID 补回来。
+adopt_live_gateway() {
+    local pid="" cand
+    if [ -f "${DATA_DIR}/gateway.pid" ]; then
+        pid="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9]\{1,\}\).*/\1/p' \
+            "${DATA_DIR}/gateway.pid" 2>/dev/null | head -n 1)"
+        # gateway.pid 里记录的必须是本 home 的 gateway，且活着
+        if [ -n "${pid}" ]; then
+            if ! check_process "${pid}" || ! is_own_gateway "${pid}"; then
+                pid=""
+            fi
+        fi
+    fi
+    if [ -z "${pid}" ]; then
+        for cand in $(is_port_in_use_pids "${SERVICE_PORT}"); do
+            if is_own_gateway "${cand}"; then pid="${cand}"; break; fi
+        done
+    fi
+    [ -n "${pid}" ] || return 1
+    printf '%s' "${pid}" > "${PID_FILE}" 2>/dev/null || return 1
+    log_msg "[状态] 采纳运行中的 gateway（PID=${pid}，非本次启动）"
+    return 0
+}
+
 status() {
     if [ -f "${PID_FILE}" ]; then
         local pid
@@ -174,8 +214,12 @@ status() {
         if check_process "${pid}"; then
             return 0
         fi
+        # app.pid 已失效（典型：Hermes 自行重启换了 PID）→ 先看真实服务是否还在
+        adopt_live_gateway && return 0
         rm -f "${PID_FILE}"
+        return 1
     fi
+    adopt_live_gateway && return 0
     return 1
 }
 

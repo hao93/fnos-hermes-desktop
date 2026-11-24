@@ -51,6 +51,26 @@ class ShellContractTests(unittest.TestCase):
         self.assertIn("load_gateway_conf", main)
         self.assertIn("GATEWAY_SOCKET_NAME", main)
 
+    def test_status_adopts_gateway_after_self_restart(self) -> None:
+        """Hermes 自重启后 app.pid 仍指向已死进程；status 必须看得见真实 gateway。
+
+        自重启（dashboard 重启 / /restart / 改配置 / 更新守护）的新进程由 detached
+        watcher 拉起，不会回写 app.pid。status 只认 app.pid 就会报未运行，应用中心
+        显示“未启用”，点“启用”还会把健康的 gateway 杀掉重开——所以必须能采纳。
+        """
+        main = read("main")
+        self.assertIn("adopt_live_gateway", main)
+        self.assertIn("is_own_gateway", main)
+        self.assertIn('"${DATA_DIR}/gateway.pid"', main)
+
+        # 两个分支都要尝试采纳：app.pid 失效，以及 app.pid 根本不存在。
+        status_body = main[main.index("status() {"):main.index("ensure_appshare")]
+        self.assertEqual(status_body.count("adopt_live_gateway && return 0"), 2)
+
+        # 只认自己 HERMES_HOME 下的 gateway，避免采纳别人的进程。
+        own = main[main.index("is_own_gateway() {"):main.index("adopt_live_gateway() {")]
+        self.assertIn('*"${DATA_DIR}"*gateway*', own)
+
     def test_basic_auth_finalized_after_install(self) -> None:
         install = read("install_callback")
         main = read("main")

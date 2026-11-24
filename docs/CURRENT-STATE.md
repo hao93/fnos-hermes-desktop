@@ -85,6 +85,7 @@
 | 内嵌登录后回 `/login` | 浏览器是否残留旧的 `hermes_*` Cookie；清除该站点 Cookie 后重试 |
 | 配置改了不生效 | 是否修改了 `@appshare/hermes-desktop/config/config.yaml` 实体文件 |
 | 模型不工作 | 检查安装向导写入的 `model` 段和 `.env` 中的 API Key |
+| 应用中心显示“未启用”，但 9120 / 内嵌入口仍可用 | Hermes 自重启（dashboard 重启、`/restart`、改配置、更新守护）换了 PID，`app.pid` 还指向已死进程；`main status` 现会采纳 `gateway.pid` 中存活的 gateway，无需再点“启用” |
 
 ## 相关文档
 
